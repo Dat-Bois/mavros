@@ -61,14 +61,56 @@ private:
    *
    */
   void send_setpoint_full(const rclcpp::Time & stamp, const uint16_t type_mask,
-                          const Eigen::Vector3d & pos_ned,
-                          const Eigen::Vector3d & vel_ned,
-                          const Eigen::Vector3d & accel_ned,
+                          const Eigen::Vector3d & pos_enu,
+                          const Eigen::Vector3d & vel_enu,
+                          const Eigen::Vector3d & accel_enu,
                           const double yaw, const double yaw_rate)
   {
     using mavlink::common::MAV_FRAME;
 
-    // auto accel = ftf::transform_frame_enu_ned(accel_enu);
+
+    auto pos_ned = [&]() -> Eigen::Vector3d {
+      // Check if position is ignored in the type_mask (rightmost 3 bits)
+      if ((type_mask & 0x7) == 0x7) {
+        return Eigen::Vector3d::Zero(); // Ignore position
+      }
+      return ftf::transform_frame_enu_ned(pos_enu);
+    } ();
+
+    auto vel_ned = [&]() -> Eigen::Vector3d {
+      // Check if velocity is ignored in the type_mask (bits 3-5)
+      if ((type_mask & (0x7 << 3)) == (0x7 << 3)) {
+        return Eigen::Vector3d::Zero(); // Ignore velocity
+      }
+      return ftf::transform_frame_enu_ned(vel_enu);
+    } ();
+
+    auto accel_ned = [&]() -> Eigen::Vector3d {
+      // Check if acceleration is ignored in the type_mask (bits 6-8)
+      if ((type_mask & (0x7 << 6)) == (0x7 << 6)) {
+        return Eigen::Vector3d::Zero(); // Ignore acceleration
+      }
+      return ftf::transform_frame_enu_ned(accel_enu);
+    } ();
+
+    // Check if yaw is ignored in the type_mask (bit 10)
+    auto y = [&]() {
+      if ((type_mask & (1 << 10)) != 0) {
+        return 0.0; // Ignore yaw
+      }
+      // return ftf::quaternion_get_yaw(ftf::transform_orientation_enu_ned(
+      //   ftf::transform_orientation_baselink_aircraft(
+      //     Eigen::Quaterniond(Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ())))));
+      return yaw;
+    } ();
+
+    auto yr = [&]() {
+      // Check if yaw rate is ignored in the type_mask (bit 11)
+      if ((type_mask & (1 << 11)) != 0) {
+        return 0.0; // Ignore yaw rate
+      }
+      return ftf::transform_frame_ned_enu(Eigen::Vector3d(0.0, 0.0, yaw_rate)).z();
+    } ();
 
     set_position_target_local_ned(
       get_time_boot_ms(stamp),
@@ -77,26 +119,26 @@ private:
       pos_ned,
       vel_ned,
       accel_ned,
-      yaw, yaw_rate);
+      y, yr);
   }
 
   /* -*- callbacks -*- */
 
   void setpoint_cb(const mavros_msgs::msg::FullSetpoint::SharedPtr req)
   {
-    Eigen::Vector3d pos_ned;
-    Eigen::Vector3d vel_ned;
-    Eigen::Vector3d accel_ned;
+    Eigen::Vector3d pos_enu;
+    Eigen::Vector3d vel_enu;
+    Eigen::Vector3d accel_enu;
 
-    tf2::fromMsg(req->position, pos_ned);
-    tf2::fromMsg(req->velocity, vel_ned);
-    tf2::fromMsg(req->acceleration, accel_ned);
+    tf2::fromMsg(req->position, pos_enu);
+    tf2::fromMsg(req->velocity, vel_enu);
+    tf2::fromMsg(req->acceleration, accel_enu);
     send_setpoint_full(
       req->header.stamp,
       req->type_mask,
-      pos_ned,
-      vel_ned,
-      accel_ned,
+      pos_enu,
+      vel_enu,
+      accel_enu,
       req->yaw,
       req->yaw_rate);
   }
